@@ -1,0 +1,67 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+use LWP::UserAgent;
+use Web::Scraper;
+use WWW::Pinboard;
+use Term::ANSIColor qw< :constants >;
+use Getopt::Long;
+
+my $verbose;
+GetOptions("verbose|v" => \$verbose);
+
+my $ua       = LWP::UserAgent->new( cookie_jar => {} );
+my $pinboard = WWW::Pinboard->new( token => $ENV{PINBOARD_TOKEN} || die("Please define PINBOARD_TOKEN") );
+my $backpack = scraper {
+    process '#hikes-results tr.hike-row', "hikes[]" => scraper {
+        process "a.hike-title", name => 'TEXT', url => '@href';
+    };
+    process '.listingBar .next a', 'next_page' => '@href';
+};
+
+my $response = $ua->post('https://www.wta.org/login', {
+    __ac_name        => $ENV{WTA_USER} || die("Please define WTA_USER\n"),
+    __ac_password    => $ENV{WTA_PASS} || die("Please define WTA_PASS\n"),
+    'form.submitted' => 1,
+    js_enabled       => 0,
+    pwd_empty        => 0,
+});
+die $ua->status_line unless $response->is_success;
+
+my @hikes;
+my $url = 'http://www.wta.org/@@backpack-hikes';
+while ($url) {
+    my $response = $ua->get($url);
+    die $ua->status_line unless $response->is_success;
+
+    my $results = $backpack->scrape($response);
+    push @hikes, @{$results->{hikes}};
+
+    $url = $results->{next_page};
+}
+
+for my $hike (@hikes) {
+    my $res = $pinboard->add(
+        description => $hike->{name},
+        url         => $hike->{url},
+        tags        => 'hike wta wtabackpack washington',
+        replace     => 'no',
+    );
+    if ($res->{result_code} eq "done") {
+        verbose(GREEN, $hike->{name}, RESET, "\n");
+    } elsif ($res->{result_code} eq "item already exists") {
+        verbose($hike->{name}, "\n");
+    } else {
+        if ($verbose) {
+            print RED, "  ! ", $res->{result_code}, RESET, "\n";
+        } else {
+            warn "Failed to add \"$hike->{name}\" <$hike->{url}>:\n  $res->{result_code}\n";
+        }
+    }
+    sleep 3;
+}
+
+sub verbose {
+    return unless $verbose;
+    print @_;
+}
