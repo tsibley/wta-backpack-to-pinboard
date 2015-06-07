@@ -26,7 +26,7 @@ my $response = $ua->post('https://www.wta.org/login', {
     js_enabled       => 0,
     pwd_empty        => 0,
 });
-die $ua->status_line unless $response->is_success;
+die $response->status_line unless $response->is_success;
 
 my @hikes;
 my $url = 'http://www.wta.org/@@backpack-hikes';
